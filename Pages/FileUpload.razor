@@ -1,0 +1,139 @@
+﻿@page "/"
+@using System.ComponentModel.DataAnnotations
+@using System.IO
+@using System.Linq
+@using System.Threading
+@using Microsoft.AspNetCore.Hosting;
+@implements IDisposable
+
+<h1 class="bg-info">Upload XML files</h1>
+
+<EditForm EditContext="editContext" OnValidSubmit="OnSubmit">
+    <DataAnnotationsValidator />
+
+    <div class="form-group">
+        Name: <InputText @bind-Value="@person.Name" class="form-control" />
+        <ValidationMessage For="() => person.Name" />
+    </div>
+
+    <div class="form-group">
+        Picture: <InputFile  OnChange="OnChange" class="form-control" />
+        <ValidationMessage For="() => person.Picture" />
+
+     </div>
+
+    <button class="btn btn-primary">Submit</button>
+</EditForm>
+
+
+@code
+{
+    private CancellationTokenSource cancelation;
+    private bool displayProgress;
+    private EditContext editContext;
+    private Person person;
+    private int progressPercent;
+
+    protected override void OnInitialized()
+    {
+        cancelation = new CancellationTokenSource();
+        person = new Person();
+        editContext = new EditContext(person);
+    }
+
+    [Inject]
+    private IWebHostEnvironment env { get; set; }
+
+    
+    private int Total;
+    string Message = "No file(s) selected";
+    IReadOnlyList<IBrowserFile> selectedFiles;
+    private async Task OnChange(InputFileChangeEventArgs e)
+    {
+        selectedFiles = e.GetMultipleFiles();
+        Message = $"{e.GetMultipleFiles().Count} file(s) selected";
+        this.StateHasChanged();
+    }
+
+    private async Task OnSubmit()
+    {
+        foreach (var file in selectedFiles)
+        {
+            Stream stream = file.OpenReadStream();
+            var path = $"{env.WebRootPath}\\{file.Name}";
+            FileStream fs = File.Create(path);
+            await stream.CopyToAsync(fs);
+            stream.Close();
+            fs.Close();
+        }
+        Message = $"{selectedFiles.Count} file(s) uploaded on server";
+        this.StateHasChanged();
+    }
+    
+
+    public void Dispose()
+    {
+        cancelation.Cancel();
+    }
+
+    public class Person
+    {
+        [Required]
+        [StringLength(20, MinimumLength = 2)]
+        public string Name { get; set; }
+
+        [Required]
+        [FileValidation(new[] { ".xml" })]
+        public IBrowserFile[] Picture { get; set; }
+    }
+
+    public static string TransformXMLToHTML(string inputXml, string xsltString)
+    {
+        
+    XDocument xmlDocument = XDocument.Load(string inputXml);    
+  
+    XDocument result = new XDocument    
+        (new XElement("table", new XAttribute("border", 1),    
+                new XElement("thead",    
+                    new XElement("tr",    
+                        new XElement("th", "Event Name"),    
+                        new XElement("th", "Event Description"),    
+                        new XElement("th", "Start Date time"),    
+                        new XElement("th", "End Date Time"))),    
+                new XElement("tbody",    
+                    from emp in xmlDocument.Descendants("Event")    
+                    select new XElement("tr",    
+                                new XElement("td", emp.Attribute("EventName").Value),    
+                                new XElement("td", emp.Element("EventDescription").Value),    
+                                new XElement("td", emp.Element("StartDate").Value),    
+                                new XElement("td", emp.Element("EndDate").Value)))));    
+  
+        }
+        return results.ToString();
+    
+
+
+    private class FileValidationAttribute : ValidationAttribute
+    {
+        public FileValidationAttribute(string[] allowedExtensions)
+        {
+            AllowedExtensions = allowedExtensions;
+        }
+
+        private string[] AllowedExtensions { get; }
+
+        protected override ValidationResult IsValid(object value, ValidationContext validationContext)
+        {
+            foreach(IBrowserFile file in (IBrowserFile[])value)
+            {
+                var extension = System.IO.Path.GetExtension(file.Name);
+
+                if (!AllowedExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase))
+                {
+                    return new ValidationResult($"File must have one of the following extensions: {string.Join(", ", AllowedExtensions)}.", new[] { validationContext.MemberName });
+                }
+            }
+            return ValidationResult.Success;
+        }
+    }
+}
